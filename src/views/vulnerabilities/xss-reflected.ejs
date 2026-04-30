@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+    <title>XSS Reflejado - <%= isVulnerable ? 'Vulnerable' : 'Seguro' %></title>
+</head>
+<body>
+    <h1>XSS Reflejado (<%= isVulnerable ? 'Vulnerable' : 'Seguro' %>)</h1>
+    
+    <form action="" method="GET">
+        <input type="text" name="name" placeholder="Escribe tu nombre">
+        <button type="submit">Saludar</button>
+    </form>
+
+    <p>Hola, <%- name %></p> 
+
+    <a href="/">Volver al Inicio</a>
+</body>
+</html>

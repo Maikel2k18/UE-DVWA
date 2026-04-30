@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+    <title>Broken Authentication</title>
+</head>
+<body>
+    <div class="container" style="background: white; padding: 40px; border-radius: 20px; max-width: 400px;">
+        <h1>Inicia Sesión</h1>
+        
+        <% if (msg) { %>
+            <% const msgClass = msg.includes('ERROR') ? 'msg-error' : 'msg-success'; %>
+            <div class="msg-box <%= msgClass %>">
+                <%= msg %>
+            </div>
+        <% } %>
+
+        <form action="" method="POST">
+            <input type="text" name="username" placeholder="Usuario" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+            <input type="password" name="password" placeholder="Contraseña" style="width: 100%; padding: 10px; margin-bottom: 20px;">
+            <button type="submit" class="btn btn-vuln" style="width: 100%;">Entrar</button>
+        </form>
+
+        <br>
+        <a href="/" class="btn btn-sec">Volver al Panel</a>
+    </div>
+</body>
+</html>

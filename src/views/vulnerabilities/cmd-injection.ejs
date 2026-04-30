@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+    <title>Command Injection</title>
+</head>
+<body>
+    <div class="container" style="background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
+        <h1>OS Command Injection</h1>
+        <p>Introduce una IP para hacer un ping:</p>
+        
+        <form action="" method="GET">
+            <input type="text" name="ip" placeholder="127.0.0.1" style="padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
+            <button type="submit" class="btn btn-vuln">Ejecutar Ping</button>
+        </form>
+
+        <% if (result) { %>
+            <div style="background: #2c3e50; color: #2ecc71; padding: 20px; border-radius: 10px; margin-top: 20px; font-family: monospace; white-space: pre;">
+                <%= result %>
+            </div>
+        <% } %>
+        <br>
+        <a href="/" class="btn btn-sec">Volver al Panel</a>
+    </div>
+</body>
+</html>

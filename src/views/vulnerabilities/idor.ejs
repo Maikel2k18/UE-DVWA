@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+    <title>IDOR - Broken Access Control</title>
+</head>
+<body>
+    <div class="container" style="background: white; padding: 40px; border-radius: 20px;">
+        <h1>IDOR (A01:2021)</h1>
+        
+        <% if (locals.error) { %>
+            <div class="msg-box msg-error"><%= error %></div>
+        <% } %>
+
+        <% if (user) { %>
+            <div style="border: 2px solid #eee; padding: 20px; border-radius: 10px;">
+                <h3>Perfil de Usuario:</h3>
+                <p><strong>Nombre:</strong> <%= user.name %></p>
+                <p><strong>Email:</strong> <%= user.email %></p>
+                <p><strong>Teléfono:</strong> <%= user.tlf %></p>
+                <p style="color: #d35400;"><strong>Dato Privado:</strong> <%= user.secreto %></p>
+            </div>
+        <% } else if (!locals.error) { %>
+            <p>No se ha seleccionado ningún perfil.</p>
+        <% } %>
+
+        <br>
+        <div class="actions">
+            <a href="/idor/<%= isVulnerable ? 'vulnerable' : 'secure' %>?id=2" class="btn btn-sec">Ver Mi Perfil (ID: 2)</a>
+            <a href="/" class="btn btn-vuln">Volver al Panel</a>
+        </div>
+    </div>
+</body>
+</html>

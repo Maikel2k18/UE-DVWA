@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+    <title>Insecure File Upload</title>
+</head>
+<body>
+    <div class="container" style="background: white; padding: 40px; border-radius: 20px;">
+        <h1>Unrestricted File Upload</h1>
+        <p>Sube tu foto de perfil (Solo JPG/PNG):</p>
+
+        <% if (msg) { %>
+            <% const msgClass = msg.includes('ERROR') ? 'msg-error' : 'msg-success'; %>
+            
+            <div class="msg-box <%= msgClass %>">
+                <%= msg %>
+            </div>
+        <% } %>
+
+        <form action="" method="POST" enctype="multipart/form-data">
+            <input type="file" name="myFile" style="margin-bottom: 20px; display: block;">
+            <button type="submit" class="btn btn-vuln">Subir Archivo</button>
+        </form>
+
+        <br>
+        <a href="/" class="btn btn-sec">Volver al Panel</a>
+    </div>
+</body>
+</html>

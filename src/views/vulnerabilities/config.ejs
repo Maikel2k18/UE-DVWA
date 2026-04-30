@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+    <title>Security Misconfiguration</title>
+</head>
+<body>
+    <div class="container" style="background: white; padding: 40px; border-radius: 20px;">
+        <h1>Security Misconfiguration</h1>
+        <p>Simulación de error de sistema:</p>
+
+        <div class="msg-box <%= isVulnerable ? 'msg-error' : 'msg-success' %>" 
+             style="font-family: monospace; white-space: pre-wrap; font-size: 0.8rem;">
+            <%= error %>
+        </div>
+
+        <br>
+        <a href="/" class="btn btn-sec">Volver al Panel</a>
+    </div>
+</body>
+</html>

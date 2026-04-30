@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>euVWA | Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <p class="subtitle">Security Laboratory</p>
+            <h1>euVWA 🛡️</h1>
+        </header>
+
+        <table class="vulnerability-table">
+            <thead>
+                <tr>
+                    <th>Vulnerabilidad</th>
+                    <th>Estado</th>
+                    <th>Laboratorio</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>XSS Reflejado</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/xss/reflected-vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/xss/reflected-secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>XSS Almacenado</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/xss-stored/vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/xss-stored/secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Command Injection</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/cmd/vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/cmd/secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>SQL Injection</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/sql/vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/sql/secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Insecure File Upload</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/upload/vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/upload/secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Broken Authentication</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/auth/vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/auth/secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Security Misconfiguration</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/config/vulnerable" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/config/secure" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Broken Access Control (IDOR)</td>
+                    <td><span class="status-badge">LISTO ✅</span></td>
+                    <td>
+                        <a href="/idor/vulnerable?id=2" class="btn btn-vuln">Vulnerable</a>
+                        <a href="/idor/secure?id=2" class="btn btn-sec">Seguro</a>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
