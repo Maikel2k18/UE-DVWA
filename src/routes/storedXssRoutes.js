@@ -5,7 +5,7 @@ const storedController = require('../controllers/storedXssController');
 router.get('/vulnerable', storedController.getStoredVulnerable);
 router.post('/vulnerable', storedController.postStoredVulnerable);
 
-router.get('/secure', storedController.getStoredSecure);
-router.post('/secure', storedController.postStoredSecure);
+router.get('/', storedController.getStoredSecure);
+router.post('/', storedController.postStoredSecure);
 
 module.exports = router;

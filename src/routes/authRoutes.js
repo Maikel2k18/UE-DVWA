@@ -2,10 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
-router.get('/vulnerable', authController.getLoginVulnerable);
-router.post('/vulnerable', authController.postLoginVulnerable);
-
-router.get('/secure', authController.getLoginSecure);
-router.post('/secure', authController.postLoginSecure);
+router.get('/login', authController.getLoginSecure);
+router.post('/login', authController.postLoginSecure);
 
 module.exports = router;
