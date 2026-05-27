@@ -1,0 +1,655 @@
+# =============================================================================
+# 🔐 PIPELINE DEVSECOPS — euVWA (Laboratorio de Vulnerabilidades Web)
+# =============================================================================
+# Asignatura : Desarrollo Seguro de Web y Apps
+# Actividad  : Actividad 2 — Caso de uso práctico SecDevOps
+# Autor      : maikel2k18
+#
+# COMPORTAMIENTO POR RAMA:
+#   main-vulnerable → El pipeline FALLA al detectar vulnerabilidades CRÍTICAS/ALTAS
+#   main-secure     → El pipeline PASA porque el código está saneado
+#
+# JOBS:
+#   1. sast          → Análisis estático (Semgrep + ESLint Security)
+#   2. dependency    → Escaneo de dependencias + generación SBOM (Trivy)
+#   3. docker-build  → Construcción y publicación de imagen en GHCR
+#   4. image-scan    → Escaneo de vulnerabilidades de la imagen Docker (Trivy)
+#   5. dast          → Análisis dinámico (OWASP ZAP Baseline Scan)
+#   6. report        → Resumen ejecutivo de seguridad
+# =============================================================================
+
+name: 🔐 DevSecOps Pipeline — euVWA
+
+on:
+  push:
+    branches:
+      - main-vulnerable
+      - main-secure
+  pull_request:
+    branches:
+      - main-vulnerable
+      - main-secure
+
+# Permisos necesarios para publicar en GHCR y subir resultados SARIF
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  actions: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/ue-dvwa
+
+# =============================================================================
+# JOB 1 — SAST: Análisis Estático de Seguridad
+# =============================================================================
+# Objetivo : Detectar vulnerabilidades en el código fuente ANTES de ejecutarlo.
+#            Semgrep aplica reglas del OWASP Top 10 y patrones Node.js.
+#            ESLint detecta patrones inseguros específicos de JavaScript.
+# Falla si : Se encuentran hallazgos de severidad ERROR (SQLi, XSS, CmdInj…)
+# =============================================================================
+jobs:
+  sast:
+    name: 🔍 SAST — Análisis Estático
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout del código fuente
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Instalar dependencias del proyecto
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # ESLint con plugins de seguridad
+      # -----------------------------------------------------------------------
+      - name: 📦 Instalar ESLint + plugins de seguridad
+        run: |
+          npm install --no-save \
+            eslint@8 \
+            eslint-plugin-security \
+            eslint-plugin-no-unsanitized \
+            @microsoft/eslint-formatter-sarif
+
+      - name: 🔍 ESLint — Análisis de seguridad (informe JSON)
+        run: |
+          npx eslint src/ \
+            --no-eslintrc \
+            --plugin security \
+            --plugin no-unsanitized \
+            --rule 'security/detect-child-process: ["error"]' \
+            --rule 'security/detect-non-literal-regexp: ["warn"]' \
+            --rule 'security/detect-object-injection: ["warn"]' \
+            --rule 'security/detect-non-literal-fs-filename: ["warn"]' \
+            --rule 'security/detect-possible-timing-attacks: ["warn"]' \
+            --rule 'security/detect-eval-with-expression: ["error"]' \
+            --rule 'security/detect-unsafe-regex: ["warn"]' \
+            --rule 'no-unsanitized/method: ["error"]' \
+            --rule 'no-unsanitized/property: ["error"]' \
+            --format json \
+            --output-file eslint-security-report.json \
+            --ext .js || true
+
+      - name: 🔍 ESLint — Validación con salida de error (falla el pipeline)
+        run: |
+          npx eslint src/ \
+            --no-eslintrc \
+            --plugin security \
+            --plugin no-unsanitized \
+            --rule 'security/detect-child-process: ["error"]' \
+            --rule 'security/detect-eval-with-expression: ["error"]' \
+            --rule 'no-unsanitized/method: ["error"]' \
+            --rule 'no-unsanitized/property: ["error"]' \
+            --ext .js
+
+      # -----------------------------------------------------------------------
+      # Semgrep — OWASP Top 10 + patrones Node.js
+      # -----------------------------------------------------------------------
+      - name: 🔍 Semgrep — Instalar
+        run: pip install semgrep --quiet
+
+      - name: 🔍 Semgrep — Escaneo OWASP Top 10 + Node.js (informe JSON)
+        run: |
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/nodejs \
+            --config p/javascript \
+            --json \
+            --output semgrep-report.json \
+            src/ || true
+
+      - name: 🔍 Semgrep — Escaneo con salida de error (falla el pipeline)
+        run: |
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/nodejs \
+            --error \
+            --severity ERROR \
+            src/
+
+      # -----------------------------------------------------------------------
+      # Subir artefactos del SAST
+      # -----------------------------------------------------------------------
+      - name: 📤 Subir informe ESLint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-eslint-report
+          path: eslint-security-report.json
+          retention-days: 30
+
+      - name: 📤 Subir informe Semgrep
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-semgrep-report
+          path: semgrep-report.json
+          retention-days: 30
+
+      - name: 📊 Resumen SAST en GitHub Summary
+        if: always()
+        run: |
+          echo "## 🔍 Resultados SAST" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Herramienta | Estado |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| ESLint Security | $([ -f eslint-security-report.json ] && echo '✅ Informe generado' || echo '❌ Sin informe') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Semgrep OWASP Top 10 | $([ -f semgrep-report.json ] && echo '✅ Informe generado' || echo '❌ Sin informe') |" >> $GITHUB_STEP_SUMMARY
+          if [ -f semgrep-report.json ]; then
+            FINDINGS=$(python3 -c "import json,sys; d=json.load(open('semgrep-report.json')); print(len(d.get('results',[])))" 2>/dev/null || echo "N/A")
+            echo "| Hallazgos Semgrep | **$FINDINGS** |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+
+# =============================================================================
+# JOB 2 — DEPENDENCY SCAN: Análisis de Dependencias + SBOM
+# =============================================================================
+# Objetivo : Identificar CVEs conocidos en las librerías npm del proyecto.
+#            Generar el SBOM (Software Bill of Materials) en formato CycloneDX
+#            para tener inventario completo de todos los componentes de software.
+# Falla si : Se detectan CVEs de severidad CRITICAL o HIGH en dependencias.
+# =============================================================================
+  dependency-scan:
+    name: 📦 Dependencias + SBOM (Trivy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout del código fuente
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Trivy — Escaneo de sistema de ficheros (dependencias npm)
+      # -----------------------------------------------------------------------
+      - name: 🔎 Trivy — Escaneo de dependencias (informe tabla)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: false
+          exit-code: '0'
+
+      - name: 🔎 Trivy — Escaneo de dependencias (informe JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-dependency-report.json'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: 🔎 Trivy — Validación CRÍTICO/ALTO (falla el pipeline)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      # -----------------------------------------------------------------------
+      # Trivy — Generación SBOM en formato CycloneDX
+      # -----------------------------------------------------------------------
+      - name: 📋 Trivy — Generar SBOM (CycloneDX JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'cyclonedx'
+          output: 'sbom-cyclonedx.json'
+          exit-code: '0'
+
+      - name: 📋 Trivy — Generar SBOM (SPDX JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'spdx-json'
+          output: 'sbom-spdx.json'
+          exit-code: '0'
+
+      - name: 📤 Subir informe Trivy (dependencias)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-trivy-report
+          path: trivy-dependency-report.json
+          retention-days: 30
+
+      - name: 📤 Subir SBOM (CycloneDX)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom-cyclonedx.json
+          retention-days: 30
+
+      - name: 📤 Subir SBOM (SPDX)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-spdx
+          path: sbom-spdx.json
+          retention-days: 30
+
+      - name: 📊 Resumen dependencias en GitHub Summary
+        if: always()
+        run: |
+          echo "## 📦 Resultados Escaneo de Dependencias" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f trivy-dependency-report.json ]; then
+            python3 << 'EOF'
+          import json, os
+          with open('trivy-dependency-report.json') as f:
+              data = json.load(f)
+          counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+          for result in data.get('Results', []):
+              for vuln in result.get('Vulnerabilities', []):
+                  sev = vuln.get('Severity', 'UNKNOWN')
+                  if sev in counts:
+                      counts[sev] += 1
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write("| Severidad | Cantidad |\n")
+              f.write("|---|---|\n")
+              for sev, count in counts.items():
+                  emoji = {'CRITICAL':'🔴','HIGH':'🟠','MEDIUM':'🟡','LOW':'🟢'}.get(sev,'⚪')
+                  f.write(f"| {emoji} {sev} | **{count}** |\n")
+          EOF
+          fi
+
+
+# =============================================================================
+# JOB 3 — DOCKER BUILD & PUSH
+# =============================================================================
+# Objetivo : Construir la imagen Docker y publicarla en GHCR.
+#            En main-vulnerable: Dockerfile inseguro (root, chmod 777, sin multi-stage).
+#            En main-secure: Dockerfile hardened (multi-stage, no-root, mínimo).
+# =============================================================================
+  docker-build:
+    name: 🐳 Docker Build & Push (GHCR)
+    runs-on: ubuntu-latest
+    needs: [sast, dependency-scan]
+    if: always()
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: 📥 Checkout del código fuente
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login en GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Generar metadatos de la imagen
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main-secure' }}
+
+      - name: 🐳 Construir y publicar imagen Docker
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: 📊 Resumen de imagen en GitHub Summary
+        run: |
+          echo "## 🐳 Imagen Docker Publicada" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Registro | \`${{ env.REGISTRY }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Imagen | \`${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rama | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Digest | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
+
+
+# =============================================================================
+# JOB 4 — IMAGE SCAN: Análisis de Vulnerabilidades de la Imagen Docker
+# =============================================================================
+# Objetivo : Escanear la imagen Docker publicada buscando CVEs en paquetes del
+#            SO (Alpine), librerías y dependencias Node.js incluidas en la imagen.
+# Falla si : Se detectan vulnerabilidades CRITICAL o HIGH con fix disponible.
+# =============================================================================
+  image-scan:
+    name: 🔎 Escaneo de Imagen Docker (Trivy)
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: always() && needs.docker-build.result != 'skipped'
+
+    steps:
+      - name: 🔑 Login en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔎 Trivy — Escaneo de imagen (informe tabla)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: 🔎 Trivy — Escaneo de imagen (informe JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
+          format: 'json'
+          output: 'trivy-image-report.json'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: 🔎 Trivy — Validación CRÍTICO/ALTO en imagen (falla el pipeline)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: 📤 Subir informe de imagen Trivy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-trivy-report
+          path: trivy-image-report.json
+          retention-days: 30
+
+      - name: 📊 Resumen imagen en GitHub Summary
+        if: always()
+        run: |
+          echo "## 🔎 Resultados Escaneo de Imagen Docker" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f trivy-image-report.json ]; then
+            python3 << 'EOF'
+          import json, os
+          with open('trivy-image-report.json') as f:
+              data = json.load(f)
+          counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+          for result in data.get('Results', []):
+              for vuln in result.get('Vulnerabilities', []):
+                  sev = vuln.get('Severity', 'UNKNOWN')
+                  if sev in counts:
+                      counts[sev] += 1
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write("| Severidad | CVEs en imagen |\n")
+              f.write("|---|---|\n")
+              for sev, count in counts.items():
+                  emoji = {'CRITICAL':'🔴','HIGH':'🟠','MEDIUM':'🟡','LOW':'🟢'}.get(sev,'⚪')
+                  f.write(f"| {emoji} {sev} | **{count}** |\n")
+          EOF
+          fi
+
+
+# =============================================================================
+# JOB 5 — DAST: Análisis Dinámico con OWASP ZAP
+# =============================================================================
+# Objetivo : Lanzar la aplicación en un contenedor y ejecutar ZAP en modo
+#            Baseline Scan mientras está VIVA. ZAP actúa como atacante
+#            automatizado probando endpoints, cabeceras HTTP, XSS, SQLi, etc.
+# =============================================================================
+  dast:
+    name: 🕷️ DAST — OWASP ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: always() && needs.docker-build.result != 'skipped'
+
+    steps:
+      - name: 📥 Checkout del código fuente
+        uses: actions/checkout@v4
+
+      - name: 🔑 Login en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🚀 Arrancar aplicación euVWA para el análisis DAST
+        run: |
+          docker run -d \
+            --name euvwa-dast \
+            -p 3000:3000 \
+            -e NODE_ENV=production \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+
+          echo "⏳ Esperando a que la aplicación arranque..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+              echo "✅ Aplicación disponible en http://localhost:3000"
+              break
+            fi
+            echo "   Intento $i/30..."
+            sleep 2
+          done
+
+      - name: 🕷️ OWASP ZAP — Baseline Scan
+        uses: zaproxy/action-baseline-scan@v0.12.0
+        with:
+          target: 'http://localhost:3000'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-I'
+          allow_issue_writing: false
+          artifact_name: 'zap-baseline-report'
+        continue-on-error: true
+
+      - name: 🕷️ OWASP ZAP — Full Scan (solo rama vulnerable)
+        if: github.ref_name == 'main-vulnerable'
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: 'http://localhost:3000'
+          cmd_options: '-I'
+          allow_issue_writing: false
+          artifact_name: 'zap-full-report'
+        continue-on-error: true
+
+      - name: 🛑 Detener contenedor de la aplicación
+        if: always()
+        run: docker stop euvwa-dast && docker rm euvwa-dast || true
+
+      - name: 📊 Resumen DAST en GitHub Summary
+        if: always()
+        run: |
+          echo "## 🕷️ Resultados DAST — OWASP ZAP" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parámetro | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Objetivo | \`http://localhost:3000\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tipo de scan | Baseline + Full (rama vulnerable) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Artefactos | \`zap-baseline-report\` / \`zap-full-report\` |" >> $GITHUB_STEP_SUMMARY
+
+
+# =============================================================================
+# JOB 6 — SECURITY REPORT: Informe Ejecutivo de Seguridad
+# =============================================================================
+# Objetivo : Generar un informe ejecutivo consolidado en Markdown con los
+#            resultados de todos los análisis anteriores.
+#            Se ejecuta SIEMPRE, incluso si algún job anterior falló.
+# =============================================================================
+  security-report:
+    name: 📄 Informe Ejecutivo de Seguridad
+    runs-on: ubuntu-latest
+    needs: [sast, dependency-scan, image-scan, dast]
+    if: always()
+
+    steps:
+      - name: 📥 Checkout del código fuente
+        uses: actions/checkout@v4
+
+      - name: 📥 Descargar artefactos de SAST
+        uses: actions/download-artifact@v4
+        with:
+          name: sast-semgrep-report
+          path: reports/sast/
+        continue-on-error: true
+
+      - name: 📥 Descargar artefactos de dependencias
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-trivy-report
+          path: reports/dependency/
+        continue-on-error: true
+
+      - name: 📥 Descargar SBOM CycloneDX
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: reports/sbom/
+        continue-on-error: true
+
+      - name: 📥 Descargar informe de imagen Docker
+        uses: actions/download-artifact@v4
+        with:
+          name: image-trivy-report
+          path: reports/image/
+        continue-on-error: true
+
+      - name: 📝 Generar informe ejecutivo de seguridad
+        run: |
+          FECHA=$(date -u +"%Y-%m-%d %H:%M UTC")
+          cat > security-executive-report.md << EOF
+          # 🔐 Informe Ejecutivo de Seguridad — euVWA
+
+          **Proyecto:** euVWA — Laboratorio de Vulnerabilidades Web
+          **Repositorio:** https://github.com/Maikel2k18/UE-DVWA
+          **Rama analizada:** \`${{ github.ref_name }}\`
+          **Commit:** \`${{ github.sha }}\`
+          **Fecha:** $FECHA
+          **Pipeline:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+
+          ## 1. Resumen Ejecutivo
+
+          Este informe consolida los resultados de los análisis de seguridad
+          automatizados ejecutados sobre la aplicación euVWA como parte del
+          pipeline DevSecOps. Se han aplicado técnicas de **Shift Left Security**,
+          integrando controles de seguridad en todas las fases del ciclo de vida
+          del desarrollo.
+
+          | Fase | Herramienta | Tipo |
+          |---|---|---|
+          | Código fuente | Semgrep (OWASP Top 10) | SAST |
+          | Código fuente | ESLint Security Plugin | SAST |
+          | Dependencias npm | Trivy (filesystem) | SCA |
+          | Inventario software | Trivy (CycloneDX/SPDX) | SBOM |
+          | Imagen Docker | Trivy (image scan) | Container Security |
+          | Aplicación en vivo | OWASP ZAP Baseline | DAST |
+
+          ## 2. Estado del Pipeline
+
+          | Job | Estado |
+          |---|---|
+          | SAST (Semgrep + ESLint) | ${{ needs.sast.result }} |
+          | Dependencias + SBOM | ${{ needs.dependency-scan.result }} |
+          | Escaneo de imagen Docker | ${{ needs.image-scan.result }} |
+          | DAST (OWASP ZAP) | ${{ needs.dast.result }} |
+
+          ## 3. Hallazgos
+
+          Ver artefactos descargables en este pipeline:
+          - \`sast-semgrep-report\` — Hallazgos SAST de Semgrep
+          - \`sast-eslint-report\` — Hallazgos ESLint Security
+          - \`dependency-trivy-report\` — CVEs en dependencias npm
+          - \`sbom-cyclonedx\` — SBOM formato CycloneDX
+          - \`sbom-spdx\` — SBOM formato SPDX
+          - \`image-trivy-report\` — CVEs en imagen Docker
+          - \`zap-baseline-report\` — Informe DAST ZAP Baseline
+          - \`zap-full-report\` — Informe DAST ZAP Full (solo main-vulnerable)
+
+          ## 4. Recomendaciones
+
+          1. **SQLi:** Reemplazar concatenación de strings por Prepared Statements
+          2. **XSS:** Aplicar Contextual Output Encoding en todas las vistas EJS
+          3. **Command Injection:** Sustituir exec() por APIs nativas de Node.js
+          4. **Docker:** Migrar a imagen multi-stage, usuario no-root, sin chmod 777
+          5. **Dependencias:** Actualizar paquetes con CVEs conocidos
+          6. **Headers HTTP:** Configurar Helmet.js (HSTS, CSP, X-Content-Type)
+          7. **Principio mínimo privilegio:** Usuario DB sin permisos root
+
+          ---
+          *Generado automáticamente por el pipeline DevSecOps — euVWA*
+          EOF
+
+      - name: 📤 Subir informe ejecutivo
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-executive-report
+          path: security-executive-report.md
+          retention-days: 90
+
+      - name: 📊 Resumen final en GitHub Summary
+        if: always()
+        run: |
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## 📄 Informe Ejecutivo Generado" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Descarga el informe desde la sección **Artifacts** de este pipeline." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resultado global del pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Resultado |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          SAST="${{ needs.sast.result }}"
+          DEPS="${{ needs.dependency-scan.result }}"
+          IMG="${{ needs.image-scan.result }}"
+          DAST="${{ needs.dast.result }}"
+          echo "| SAST | $([ "$SAST" = "success" ] && echo '✅ Pasó' || echo '❌ Falló') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependencias + SBOM | $([ "$DEPS" = "success" ] && echo '✅ Pasó' || echo '❌ Falló') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Imagen Docker | $([ "$IMG" = "success" ] && echo '✅ Pasó' || echo '❌ Falló') |" >> $GITHUB_STEP_SUMMARY
+          echo "| DAST | $([ "$DAST" = "success" ] && echo '✅ Pasó' || echo '❌ Falló') |" >> $GITHUB_STEP_SUMMARY

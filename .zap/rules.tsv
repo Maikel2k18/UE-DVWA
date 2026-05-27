@@ -1,0 +1,19 @@
+# Reglas de OWASP ZAP para euVWA
+# Formato: <ID_REGLA>\t<ACCIÓN>
+# Acciones: IGNORE (ignorar), WARN (advertencia), FAIL (falla el pipeline)
+#
+# Referencia de IDs: https://www.zaproxy.org/docs/alerts/
+#
+# Reglas que ignoramos (falsos positivos conocidos en entorno de lab):
+10015	IGNORE	# Incomplete or No Cache-control Header (no aplica en lab)
+10027	IGNORE	# Information Disclosure - Suspicious Comments (código de lab)
+10096	IGNORE	# Timestamp Disclosure (no crítico en lab)
+90033	IGNORE	# Loosely Scoped Cookie (entorno de laboratorio)
+#
+# Reglas que deben FALLAR (vulnerabilidades reales esperadas en main-vulnerable):
+40012	FAIL	# Cross Site Scripting (Reflected)
+40014	FAIL	# Cross Site Scripting (Persistent)
+40018	FAIL	# SQL Injection
+40032	FAIL	# .htaccess Information Leak
+90019	FAIL	# Server Side Code Injection
+90020	FAIL	# Remote OS Command Injection
