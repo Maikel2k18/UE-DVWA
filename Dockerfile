@@ -1,22 +1,45 @@
-# Usamos Alpine porque nos permite controlar mejor las librerías de C
-FROM node:18-alpine
+# =============================================================================
+# FASE 1: Construcción y Compilación (Build Stage)
+# =============================================================================
+FROM node:18-alpine AS builder
 
-# Instalamos las herramientas necesarias para compilar SQLite en Linux
-RUN apk add --no-cache python3 make g++ 
+WORKDIR /usr/src/app
 
-WORKDIR /app
-
-# Copiamos solo los archivos de dependencias
+# Copiar manifiestos de dependencias
 COPY package*.json ./
 
-# Instalamos desde cero (esto compilará sqlite3 correctamente para Linux)
-RUN npm install
+# Instalar dependencias de forma limpia y estricta
+RUN npm ci
 
-# Copiamos el resto del código
+# Copiar el resto del código fuente de la aplicación
 COPY . .
 
-RUN mkdir -p src/public/uploads && chmod 777 src/public/uploads
+# Eliminar las dependencias de desarrollo (devDependencies) para reducir tamaño y mitigar CVEs
+RUN npm prune --production
 
+# =============================================================================
+# FASE 2: Ejecución Segura en Producción (Production Stage)
+# =============================================================================
+FROM node:18-alpine AS runner
+
+# Declarar el entorno de ejecución como producción
+ENV NODE_ENV=production
+
+WORKDIR /usr/src/app
+
+# PRINCIPIO SHIFT LEFT: Copiar ÚNICAMENTE los artefactos necesarios compilados
+COPY --from=builder /usr/src/app/package*.json ./
+COPY --from=builder /usr/src/app/node_modules ./node_modules
+COPY --from=builder /usr/src/app/src ./src
+
+# PRINCIPIO DE MÍNIMO PRIVILEGIO: Usar el usuario seguro 'node' (no-root) preconfigurado en Alpine
+RUN chown -R node:node /usr/src/app
+
+# Cambiar de root al usuario sin privilegios del sistema
+USER node
+
+# Exponer el puerto de escucha de la aplicación
 EXPOSE 3000
 
+# Arrancar la aplicación directamente evitando shells intermedias vulnerables
 CMD ["node", "src/app.js"]
