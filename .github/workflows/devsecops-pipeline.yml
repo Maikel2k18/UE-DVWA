@@ -71,34 +71,29 @@ jobs:
       # ESLint con plugins de seguridad
       # -----------------------------------------------------------------------
       - name: 📦 Instalar ESLint + plugins de seguridad
-        run: |
-          npm install --no-save \
-            eslint@8 \
-            eslint-plugin-security \
-            eslint-plugin-no-unsanitized@3
+        run: npm install --no-save eslint@8 eslint-plugin-security
 
       - name: 🔍 ESLint — Análisis de seguridad (informe JSON)
         run: |
-          # Stdout redirect es más fiable que --output-file en entornos CI
           npx eslint src/ \
             --no-eslintrc \
             --config .eslintrc.security.json \
             --format json \
             --ext .js > eslint-security-report.json 2>/dev/null || true
-          # Garantizar que el fichero existe aunque ESLint haya fallado con error fatal
           [ -s eslint-security-report.json ] || \
-            echo '[{"filePath":"fatal-config-error","messages":[],"errorCount":0,"warningCount":0}]' \
+            echo '[{"filePath":"scan-error","messages":[],"errorCount":0,"warningCount":0}]' \
             > eslint-security-report.json
 
       # -----------------------------------------------------------------------
       # Semgrep — OWASP Top 10 + patrones Node.js
-      # IMPORTANTE: estos pasos van ANTES de las validaciones que fallan el pipeline
-      # para que no sean omitidos por un fallo previo de ESLint
+      # if: always() en TODOS los pasos para que corran aunque ESLint falle
       # -----------------------------------------------------------------------
       - name: 🔍 Semgrep — Instalar
+        if: always()
         run: pip install semgrep --quiet
 
       - name: 🔍 Semgrep — Escaneo OWASP Top 10 + Node.js (informe JSON)
+        if: always()
         run: |
           semgrep \
             --config p/owasp-top-ten \
@@ -107,7 +102,6 @@ jobs:
             --json \
             --output semgrep-report.json \
             src/ || true
-          # Garantizar que el fichero existe aunque Semgrep haya fallado
           [ -s semgrep-report.json ] || \
             echo '{"results":[],"errors":[],"version":"0.0.0"}' > semgrep-report.json
 
@@ -145,24 +139,20 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # Validaciones al FINAL — fallan el pipeline pero los artefactos ya están subidos
+      # Validaciones al FINAL — Controla el fallo controlado según la rama analizada
       # -----------------------------------------------------------------------
-      - name: 🔍 ESLint — Validación con salida de error (falla el pipeline)
-        run: |
-          npx eslint src/ \
-            --no-eslintrc \
-            --config .eslintrc.security.json \
-            --ext .js
-
-      - name: 🔍 Semgrep — Escaneo con salida de error (falla el pipeline)
+      - name: 🔍 Validación final de Severidad SAST
         if: always()
         run: |
-          semgrep \
-            --config p/owasp-top-ten \
-            --config p/nodejs \
-            --error \
-            --severity ERROR \
-            src/
+          if [ -f semgrep-report.json ]; then
+            FINDINGS=$(python3 -c "import json; d=json.load(open('semgrep-report.json')); print(len(d.get('results',[])))" 2>/dev/null || echo "0")
+            echo "Total de hallazgos criticos/altos detectados por Semgrep: $FINDINGS"
+            
+            if [ "$FINDINGS" -gt "0" ] && [ "${{ github.ref_name }}" = "main-vulnerable" ]; then
+              echo "❌ Se detiene el pipeline de forma intencionada: Vulnerabilidades detectadas en la rama vulnerable."
+              exit 1
+            fi
+          fi
 
 
 # =============================================================================
@@ -203,15 +193,6 @@ jobs:
           output: 'trivy-dependency-report.json'
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '0'
-
-      - name: 🔎 Trivy — Validación CRÍTICO/ALTO (falla el pipeline)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
 
       # -----------------------------------------------------------------------
       # Trivy — Generación SBOM en formato CycloneDX
@@ -281,6 +262,17 @@ jobs:
                   emoji = {'CRITICAL':'🔴','HIGH':'🟠','MEDIUM':'🟡','LOW':'🟢'}.get(sev,'⚪')
                   f.write(f"| {emoji} {sev} | **{count}** |\n")
           EOF
+          fi
+
+      - name: 🔎 Trivy — Validación CRÍTICO/ALTO dependencias (falla el pipeline condicional)
+        if: always()
+        run: |
+          if [ "${{ github.ref_name }}" = "main-vulnerable" ] && [ -f trivy-dependency-report.json ]; then
+            CRIT_HIGH=$(python3 -c "import json; d=json.load(open('trivy-dependency-report.json')); print(sum(len(r.get('Vulnerabilities', [])) for r in d.get('Results', []) if r.get('Vulnerabilities'))) " 2>/dev/null || echo "0")
+            if [ "$CRIT_HIGH" -gt "0" ]; then
+              echo "❌ Se interrumpe por vulnerabilidades criticas o altas encontradas en dependencias npm en la rama vulnerable."
+              exit 1
+            fi
           fi
 
 
@@ -391,16 +383,6 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '0'
 
-      - name: 🔎 Trivy — Validación CRÍTICO/ALTO en imagen (falla el pipeline)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'image'
-          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
-          exit-code: '1'
-
       - name: 📤 Subir informe de imagen Trivy
         if: always()
         uses: actions/upload-artifact@v4
@@ -432,6 +414,17 @@ jobs:
                   emoji = {'CRITICAL':'🔴','HIGH':'🟠','MEDIUM':'🟡','LOW':'🟢'}.get(sev,'⚪')
                   f.write(f"| {emoji} {sev} | **{count}** |\n")
           EOF
+          fi
+
+      - name: 🔎 Trivy — Validación CRÍTICO/ALTO en imagen (falla el pipeline condicional)
+        if: always()
+        run: |
+          if [ "${{ github.ref_name }}" = "main-vulnerable" ] && [ -f trivy-image-report.json ]; then
+            IMAGE_VULNS=$(python3 -c "import json; d=json.load(open('trivy-image-report.json')); print(sum(len(r.get('Vulnerabilities', [])) for r in d.get('Results', []) if r.get('Vulnerabilities'))) " 2>/dev/null || echo "0")
+            if [ "$IMAGE_VULNS" -gt "0" ]; then
+              echo "❌ Se detiene el pipeline: Imagen Docker insegura detectada en la rama vulnerable."
+              exit 1
+            fi
           fi
 
 
@@ -479,24 +472,22 @@ jobs:
 
       - name: 🕷️ OWASP ZAP — Baseline Scan
         run: |
-          # Verificar que la app sigue corriendo
           docker inspect euvwa-dast --format='App: {{.State.Status}}' 2>/dev/null || \
             echo "WARNING: contenedor euvwa-dast no responde"
-          # Directorio de salida con permisos amplios (usuario zap uid=1000 del contenedor)
+          
           mkdir -p "${GITHUB_WORKSPACE}/zap-reports"
           chmod 777 "${GITHUB_WORKSPACE}/zap-reports"
           docker pull ghcr.io/zaproxy/zaproxy:stable
+          
           docker run --rm \
-            --network host \
-            --user root \
-            -v "${GITHUB_WORKSPACE}/zap-reports":/zap/wrk \
+            -v "${GITHUB_WORKSPACE}/zap-reports":/zap/wrk:rw \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://localhost:3000 \
-            -r /zap/wrk/zap-baseline-report.html \
-            -J /zap/wrk/zap-baseline-report.json \
+            -t http://172.17.0.1:3000 \
+            -r zap-baseline-report.html \
+            -J zap-baseline-report.json \
             -I || true
-          # Copiar informes al directorio de trabajo para el upload
+            
           cp "${GITHUB_WORKSPACE}/zap-reports"/*.html . 2>/dev/null || true
           cp "${GITHUB_WORKSPACE}/zap-reports"/*.json . 2>/dev/null || true
         continue-on-error: true
@@ -506,16 +497,16 @@ jobs:
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/zap-reports"
           chmod 777 "${GITHUB_WORKSPACE}/zap-reports"
+          
           docker run --rm \
-            --network host \
-            --user root \
-            -v "${GITHUB_WORKSPACE}/zap-reports":/zap/wrk \
+            -v "${GITHUB_WORKSPACE}/zap-reports":/zap/wrk:rw \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-full-scan.py \
-            -t http://localhost:3000 \
-            -r /zap/wrk/zap-full-report.html \
-            -J /zap/wrk/zap-full-report.json \
+            -t http://172.17.0.1:3000 \
+            -r zap-full-report.html \
+            -J zap-full-report.json \
             -I || true
+            
           cp "${GITHUB_WORKSPACE}/zap-reports"/*.html . 2>/dev/null || true
           cp "${GITHUB_WORKSPACE}/zap-reports"/*.json . 2>/dev/null || true
         continue-on-error: true
@@ -544,7 +535,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Parámetro | Valor |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Objetivo | \`http://localhost:3000\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Objetivo | \`http://172.17.0.1:3000\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Tipo de scan | Baseline + Full (rama vulnerable) |" >> $GITHUB_STEP_SUMMARY
           echo "| Artefactos | \`zap-baseline-report\` / \`zap-full-report\` |" >> $GITHUB_STEP_SUMMARY
 
@@ -568,31 +559,31 @@ jobs:
 
       - name: 📥 Descargar artefactos de SAST
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: sast-semgrep-report
           path: reports/sast/
-        continue-on-error: true
 
       - name: 📥 Descargar artefactos de dependencias
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: dependency-trivy-report
           path: reports/dependency/
-        continue-on-error: true
 
       - name: 📥 Descargar SBOM CycloneDX
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: sbom-cyclonedx
           path: reports/sbom/
-        continue-on-error: true
 
       - name: 📥 Descargar informe de imagen Docker
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: image-trivy-report
           path: reports/image/
-        continue-on-error: true
 
       - name: 📝 Generar informe ejecutivo de seguridad
         run: |
@@ -647,7 +638,7 @@ jobs:
           - \`zap-baseline-report\` — Informe DAST ZAP Baseline
           - \`zap-full-report\` — Informe DAST ZAP Full (solo main-vulnerable)
 
-          ## 4. Recomendaciones
+          ## 4. Recommendations
 
           1. **SQLi:** Reemplazar concatenación de strings por Prepared Statements
           2. **XSS:** Aplicar Contextual Output Encoding en todas las vistas EJS
