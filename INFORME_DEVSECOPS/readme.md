@@ -14,6 +14,8 @@ El archivo de orquestación de la infraestructura (`devsecops-pipeline.yml`) se 
 * **🕷️ DAST (Análisis Dinámico):** Realiza un despliegue efímero y seguro del contenedor e invoca un análisis dinámico automatizado de caja negra a través de **OWASP ZAP**. Evalúa cabeceras de red, endpoints activos y configuraciones en vivo atacando la interfaz de la app.
 * **📄 Informe Ejecutivo de Seguridad:** Job consolidador encargado de unificar los JSON de reporte de las fases previas y publicar un documento Markdown resumido en la sección de artefactos de GitHub Actions.
 
+
+
 ---
 
 ## 2. Análisis Comparativo: `main-vulnerable` vs `main-secure`
@@ -21,6 +23,8 @@ El archivo de orquestación de la infraestructura (`devsecops-pipeline.yml`) se 
 El pipeline implementa una **lógica condicional estricta según la rama analizada**:
 1.  En la rama `main-vulnerable`, la detección de brechas críticas o altas detiene la tubería de ejecución (`exit 1`) para actuar como un cortafuegos de ingeniería.
 2.  En la rama `main-secure`, tras aplicar parches y hardening, las herramientas validan que no existen riesgos de severidad crítica/alta y permiten un flujo exitoso en verde.
+![ ](img/flujo1.jpeg) 
+![](img/flujo.jpeg)
 
 ### 📊 Tabla 1: Resumen Global de Ejecución de Jobs
 A continuación se contrasta de manera literal el comportamiento de los flujos de trabajo obtenidos de las ejecuciones del pipeline:
@@ -32,6 +36,8 @@ A continuación se contrasta de manera literal el comportamiento de los flujos d
 | **🐳 Imagen Docker** | ❌ **Falló** | ✅ **Pasó** | Bloqueado por riesgos altos de la base. Solucionado con Dockerfile Hardened. |
 | **🕷️ DAST (OWASP ZAP)** | ✅ **Pasó** | ✅ **Pasó** | Ataque dinámico completado con éxito sobre la red puente interna. |
 
+
+![ ](img/job1.jpeg) ![](img/job2.jpeg)
 ---
 
 ### 🔍 Evidencias Literales de Auditoría Estática (SAST) y Dependencias
@@ -39,8 +45,7 @@ A continuación se contrasta de manera literal el comportamiento de los flujos d
 #### Flujo Inseguro (`main-vulnerable`)
 El análisis estático de Semgrep reporta vulnerabilidades críticas en el código. Asimismo, el escaneo SCA de dependencias detiene el paso por políticas de severidad alta:
 
-![Resultado de los Trabajos Vulnerable](docs/img/vulnerable-pipeline-flow.png)
-*Imagen de referencia: Vista estructural del pipeline de la rama vulnerable abortado por políticas de riesgo.*
+
 
 * **Hallazgos Semgrep detectados:** 2 de severidad Crítica/Alta.
 * **Estado de los informes:** Seguridad de ESLint (Informe generado), Semgrep OWASP Top 10 (Informe generado).
@@ -56,7 +61,10 @@ Al mitigar el código y purgar el árbol de paquetes, se observa la ausencia de 
 | **Librerías con Riesgo MEDIANO** | — | **0** |
 | **Librerías con Riesgo BAJO** | — | **0** |
 
-![Métricas de Dependencias Limpias](docs/img/secure-sast-dependency-results.png)
+
+![ ](img/TRIVY2.jpeg)
+![ ](img/TRIVY1.jpeg)
+
 *Imagen de referencia: Trazas de Trivy confirmando un inventario de librerías de producción con cero riesgos críticos o altos.*
 
 ---
@@ -75,6 +83,9 @@ La construcción e inspección profunda de la imagen de contenedor publicada en 
 | **Vulnerabilidades MEDIANAS** | **17** | **16** |
 | **Vulnerabilidades BAJAS** | **0** | **0** |
 
+![ ](img/TRI2.jpeg)
+![ ](img/TRI1.jpeg)
+
 > 💡 *Nota de Auditoría:* El ligero incremento de 25 a 26 vulnerabilidades altas en la rama segura y la estabilidad de las 2 críticas se debe al entorno de ejecución (*runtime*) inalterado de Node.js nativo de Alpine Linux, justificando la incorporación de umbrales tolerantes controlados en la gobernanza DevSecOps.
 
 ---
@@ -83,7 +94,8 @@ La construcción e inspección profunda de la imagen de contenedor publicada en 
 
 El escaneo dinámico automatizado interactúa de forma directa con la aplicación en vivo desplegada en la infraestructura efímera del runner:
 
-![Resultado de OWASP ZAP en Vivo](docs/img/dast-zap-results.png)
+![Resultado de OWASP ZAP en Vivo](img/OWAST.jpeg)
+
 *Imagen de referencia: Configuración técnica del ataque dinámico reportado de forma exitosa en el pipeline corporativo.*
 
 * **Objetivo bajo ataque simulado:** `http://172.17.0.1:3000` *(Dirección puente del puente interno de Docker asignada para evadir conflictos de red y usuario root)*.
