@@ -75,27 +75,25 @@ jobs:
           npm install --no-save \
             eslint@8 \
             eslint-plugin-security \
-            eslint-plugin-no-unsanitized \
-            @microsoft/eslint-formatter-sarif
+            eslint-plugin-no-unsanitized@3
 
       - name: 🔍 ESLint — Análisis de seguridad (informe JSON)
         run: |
+          # Stdout redirect es más fiable que --output-file en entornos CI
           npx eslint src/ \
             --no-eslintrc \
             --config .eslintrc.security.json \
             --format json \
-            --output-file eslint-security-report.json \
-            --ext .js || true
-
-      - name: 🔍 ESLint — Validación con salida de error (falla el pipeline)
-        run: |
-          npx eslint src/ \
-            --no-eslintrc \
-            --config .eslintrc.security.json \
-            --ext .js
+            --ext .js > eslint-security-report.json 2>/dev/null || true
+          # Garantizar que el fichero existe aunque ESLint haya fallado con error fatal
+          [ -s eslint-security-report.json ] || \
+            echo '[{"filePath":"fatal-config-error","messages":[],"errorCount":0,"warningCount":0}]' \
+            > eslint-security-report.json
 
       # -----------------------------------------------------------------------
       # Semgrep — OWASP Top 10 + patrones Node.js
+      # IMPORTANTE: estos pasos van ANTES de las validaciones que fallan el pipeline
+      # para que no sean omitidos por un fallo previo de ESLint
       # -----------------------------------------------------------------------
       - name: 🔍 Semgrep — Instalar
         run: pip install semgrep --quiet
@@ -109,18 +107,12 @@ jobs:
             --json \
             --output semgrep-report.json \
             src/ || true
-
-      - name: 🔍 Semgrep — Escaneo con salida de error (falla el pipeline)
-        run: |
-          semgrep \
-            --config p/owasp-top-ten \
-            --config p/nodejs \
-            --error \
-            --severity ERROR \
-            src/
+          # Garantizar que el fichero existe aunque Semgrep haya fallado
+          [ -s semgrep-report.json ] || \
+            echo '{"results":[],"errors":[],"version":"0.0.0"}' > semgrep-report.json
 
       # -----------------------------------------------------------------------
-      # Subir artefactos del SAST
+      # Subir artefactos ANTES de las validaciones (que fallan el pipeline)
       # -----------------------------------------------------------------------
       - name: 📤 Subir informe ESLint
         if: always()
@@ -151,6 +143,26 @@ jobs:
             FINDINGS=$(python3 -c "import json,sys; d=json.load(open('semgrep-report.json')); print(len(d.get('results',[])))" 2>/dev/null || echo "N/A")
             echo "| Hallazgos Semgrep | **$FINDINGS** |" >> $GITHUB_STEP_SUMMARY
           fi
+
+      # -----------------------------------------------------------------------
+      # Validaciones al FINAL — fallan el pipeline pero los artefactos ya están subidos
+      # -----------------------------------------------------------------------
+      - name: 🔍 ESLint — Validación con salida de error (falla el pipeline)
+        run: |
+          npx eslint src/ \
+            --no-eslintrc \
+            --config .eslintrc.security.json \
+            --ext .js
+
+      - name: 🔍 Semgrep — Escaneo con salida de error (falla el pipeline)
+        if: always()
+        run: |
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/nodejs \
+            --error \
+            --severity ERROR \
+            src/
 
 
 # =============================================================================
@@ -467,30 +479,45 @@ jobs:
 
       - name: 🕷️ OWASP ZAP — Baseline Scan
         run: |
+          # Verificar que la app sigue corriendo
+          docker inspect euvwa-dast --format='App: {{.State.Status}}' 2>/dev/null || \
+            echo "WARNING: contenedor euvwa-dast no responde"
+          # Directorio de salida con permisos amplios (usuario zap uid=1000 del contenedor)
+          mkdir -p "${GITHUB_WORKSPACE}/zap-reports"
+          chmod 777 "${GITHUB_WORKSPACE}/zap-reports"
           docker pull ghcr.io/zaproxy/zaproxy:stable
           docker run --rm \
             --network host \
-            -v $(pwd):/zap/wrk \
+            --user root \
+            -v "${GITHUB_WORKSPACE}/zap-reports":/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
             -t http://localhost:3000 \
             -r /zap/wrk/zap-baseline-report.html \
             -J /zap/wrk/zap-baseline-report.json \
             -I || true
+          # Copiar informes al directorio de trabajo para el upload
+          cp "${GITHUB_WORKSPACE}/zap-reports"/*.html . 2>/dev/null || true
+          cp "${GITHUB_WORKSPACE}/zap-reports"/*.json . 2>/dev/null || true
         continue-on-error: true
 
       - name: 🕷️ OWASP ZAP — Full Scan (solo rama vulnerable)
         if: github.ref_name == 'main-vulnerable'
         run: |
+          mkdir -p "${GITHUB_WORKSPACE}/zap-reports"
+          chmod 777 "${GITHUB_WORKSPACE}/zap-reports"
           docker run --rm \
             --network host \
-            -v $(pwd):/zap/wrk \
+            --user root \
+            -v "${GITHUB_WORKSPACE}/zap-reports":/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-full-scan.py \
             -t http://localhost:3000 \
             -r /zap/wrk/zap-full-report.html \
             -J /zap/wrk/zap-full-report.json \
             -I || true
+          cp "${GITHUB_WORKSPACE}/zap-reports"/*.html . 2>/dev/null || true
+          cp "${GITHUB_WORKSPACE}/zap-reports"/*.json . 2>/dev/null || true
         continue-on-error: true
 
       - name: 📤 Subir informes ZAP
