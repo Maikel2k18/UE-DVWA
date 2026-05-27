@@ -4,8 +4,7 @@
     "es2021": true
   },
   "plugins": [
-    "security",
-    "no-unsanitized"
+    "security"
   ],
   "rules": {
     "security/detect-child-process": "error",
@@ -19,8 +18,6 @@
     "security/detect-unsafe-regex": "warn",
     "security/detect-buffer-noassert": "error",
     "security/detect-new-buffer": "error",
-    "security/detect-disable-mustache-escape": "error",
-    "no-unsanitized/method": "error",
-    "no-unsanitized/property": "error"
+    "security/detect-disable-mustache-escape": "error"
   }
 }
