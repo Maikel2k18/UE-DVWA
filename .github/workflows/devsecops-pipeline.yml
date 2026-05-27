@@ -44,11 +44,6 @@ env:
 # =============================================================================
 # JOB 1 — SAST: Análisis Estático de Seguridad
 # =============================================================================
-# Objetivo : Detectar vulnerabilidades en el código fuente ANTES de ejecutarlo.
-#            Semgrep aplica reglas del OWASP Top 10 y patrones Node.js.
-#            ESLint detecta patrones inseguros específicos de JavaScript.
-# Falla si : Se encuentran hallazgos de severidad ERROR (SQLi, XSS, CmdInj…)
-# =============================================================================
 jobs:
   sast:
     name: 🔍 SAST — Análisis Estático
@@ -67,9 +62,6 @@ jobs:
       - name: 📦 Instalar dependencias del proyecto
         run: npm ci
 
-      # -----------------------------------------------------------------------
-      # ESLint con plugins de seguridad
-      # -----------------------------------------------------------------------
       - name: 📦 Instalar ESLint + plugins de seguridad
         run: npm install --no-save eslint@8 eslint-plugin-security
 
@@ -84,10 +76,6 @@ jobs:
             echo '[{"filePath":"scan-error","messages":[],"errorCount":0,"warningCount":0}]' \
             > eslint-security-report.json
 
-      # -----------------------------------------------------------------------
-      # Semgrep — OWASP Top 10 + patrones Node.js
-      # if: always() en TODOS los pasos para que corran aunque ESLint falle
-      # -----------------------------------------------------------------------
       - name: 🔍 Semgrep — Instalar
         if: always()
         run: pip install semgrep --quiet
@@ -105,9 +93,6 @@ jobs:
           [ -s semgrep-report.json ] || \
             echo '{"results":[],"errors":[],"version":"0.0.0"}' > semgrep-report.json
 
-      # -----------------------------------------------------------------------
-      # Subir artefactos ANTES de las validaciones (que fallan el pipeline)
-      # -----------------------------------------------------------------------
       - name: 📤 Subir informe ESLint
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,9 +123,6 @@ jobs:
             echo "| Hallazgos Semgrep | **$FINDINGS** |" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # -----------------------------------------------------------------------
-      # Validaciones al FINAL — Controla el fallo controlado según la rama analizada
-      # -----------------------------------------------------------------------
       - name: 🔍 Validación final de Severidad SAST
         if: always()
         run: |
@@ -154,14 +136,8 @@ jobs:
             fi
           fi
 
-
 # =============================================================================
 # JOB 2 — DEPENDENCY SCAN: Análisis de Dependencias + SBOM
-# =============================================================================
-# Objetivo : Identificar CVEs conocidos en las librerías npm del proyecto.
-#            Generar el SBOM (Software Bill of Materials) en formato CycloneDX
-#            para tener inventario completo de todos los componentes de software.
-# Falla si : Se detectan CVEs de severidad CRITICAL o HIGH en dependencias.
 # =============================================================================
   dependency-scan:
     name: 📦 Dependencias + SBOM (Trivy)
@@ -171,9 +147,6 @@ jobs:
       - name: 📥 Checkout del código fuente
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # Trivy — Escaneo de sistema de ficheros (dependencias npm)
-      # -----------------------------------------------------------------------
       - name: 🔎 Trivy — Escaneo de dependencias (informe tabla)
         uses: aquasecurity/trivy-action@master
         with:
@@ -194,9 +167,6 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '0'
 
-      # -----------------------------------------------------------------------
-      # Trivy — Generación SBOM en formato CycloneDX
-      # -----------------------------------------------------------------------
       - name: 📋 Trivy — Generar SBOM (CycloneDX JSON)
         uses: aquasecurity/trivy-action@master
         with:
@@ -275,13 +245,8 @@ jobs:
             fi
           fi
 
-
 # =============================================================================
 # JOB 3 — DOCKER BUILD & PUSH
-# =============================================================================
-# Objetivo : Construir la imagen Docker y publicarla en GHCR.
-#            En main-vulnerable: Dockerfile inseguro (root, chmod 777, sin multi-stage).
-#            En main-secure: Dockerfile hardened (multi-stage, no-root, mínimo).
 # =============================================================================
   docker-build:
     name: 🐳 Docker Build & Push (GHCR)
@@ -306,7 +271,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🏷️ Generar metadatos de la imagen
+      - name: 🏷️ Generar metadatos de la imagen (Forzando minúsculas)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -340,13 +305,8 @@ jobs:
           echo "| Rama | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Digest | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
 
-
 # =============================================================================
 # JOB 4 — IMAGE SCAN: Análisis de Vulnerabilidades de la Imagen Docker
-# =============================================================================
-# Objetivo : Escanear la imagen Docker publicada buscando CVEs en paquetes del
-#            SO (Alpine), librerías y dependencias Node.js incluidas en la imagen.
-# Falla si : Se detectan vulnerabilidades CRITICAL o HIGH con fix disponible.
 # =============================================================================
   image-scan:
     name: 🔎 Escaneo de Imagen Docker (Trivy)
@@ -355,6 +315,12 @@ jobs:
     if: always() && needs.docker-build.result != 'skipped'
 
     steps:
+      - name: 🏷️ Sanear nombre de la imagen (convertir a minúsculas)
+        id: string
+        run: |
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_REF=${IMAGE_LOWER}:${{ github.ref_name }}" >> $GITHUB_ENV
+
       - name: 🔑 Login en GHCR
         uses: docker/login-action@v3
         with:
@@ -367,7 +333,7 @@ jobs:
         continue-on-error: true
         with:
           scan-type: 'image'
-          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
+          image-ref: ${{ env.IMAGE_REF }}
           format: 'table'
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '0'
@@ -377,7 +343,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
-          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
+          image-ref: ${{ env.IMAGE_REF }}
           format: 'json'
           output: 'trivy-image-report.json'
           severity: 'CRITICAL,HIGH,MEDIUM'
@@ -427,13 +393,8 @@ jobs:
             fi
           fi
 
-
 # =============================================================================
 # JOB 5 — DAST: Análisis Dinámico con OWASP ZAP
-# =============================================================================
-# Objetivo : Lanzar la aplicación en un contenedor y ejecutar ZAP en modo
-#            Baseline Scan mientras está VIVA. ZAP actúa como atacante
-#            automatizado probando endpoints, cabeceras HTTP, XSS, SQLi, etc.
 # =============================================================================
   dast:
     name: 🕷️ DAST — OWASP ZAP Baseline Scan
@@ -444,6 +405,12 @@ jobs:
     steps:
       - name: 📥 Checkout del código fuente
         uses: actions/checkout@v4
+
+      - name: 🏷️ Sanear nombre de la imagen (convertir a minúsculas)
+        id: string
+        run: |
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_REF=${IMAGE_LOWER}:${{ github.ref_name }}" >> $GITHUB_ENV
 
       - name: 🔑 Login en GHCR
         uses: docker/login-action@v3
@@ -458,7 +425,7 @@ jobs:
             --name euvwa-dast \
             -p 3000:3000 \
             -e NODE_ENV=production \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ${{ env.IMAGE_REF }}
 
           echo "⏳ Esperando a que la aplicación arranque..."
           for i in $(seq 1 30); do
@@ -539,13 +506,8 @@ jobs:
           echo "| Tipo de scan | Baseline + Full (rama vulnerable) |" >> $GITHUB_STEP_SUMMARY
           echo "| Artefactos | \`zap-baseline-report\` / \`zap-full-report\` |" >> $GITHUB_STEP_SUMMARY
 
-
 # =============================================================================
 # JOB 6 — SECURITY REPORT: Informe Ejecutivo de Seguridad
-# =============================================================================
-# Objetivo : Generar un informe ejecutivo consolidado en Markdown con los
-#            resultados de todos los análisis anteriores.
-#            Se ejecuta SIEMPRE, incluso si algún job anterior falló.
 # =============================================================================
   security-report:
     name: 📄 Informe Ejecutivo de Seguridad
