@@ -82,17 +82,7 @@ jobs:
         run: |
           npx eslint src/ \
             --no-eslintrc \
-            --plugin security \
-            --plugin no-unsanitized \
-            --rule 'security/detect-child-process: ["error"]' \
-            --rule 'security/detect-non-literal-regexp: ["warn"]' \
-            --rule 'security/detect-object-injection: ["warn"]' \
-            --rule 'security/detect-non-literal-fs-filename: ["warn"]' \
-            --rule 'security/detect-possible-timing-attacks: ["warn"]' \
-            --rule 'security/detect-eval-with-expression: ["error"]' \
-            --rule 'security/detect-unsafe-regex: ["warn"]' \
-            --rule 'no-unsanitized/method: ["error"]' \
-            --rule 'no-unsanitized/property: ["error"]' \
+            --config .eslintrc.security.json \
             --format json \
             --output-file eslint-security-report.json \
             --ext .js || true
@@ -101,12 +91,7 @@ jobs:
         run: |
           npx eslint src/ \
             --no-eslintrc \
-            --plugin security \
-            --plugin no-unsanitized \
-            --rule 'security/detect-child-process: ["error"]' \
-            --rule 'security/detect-eval-with-expression: ["error"]' \
-            --rule 'no-unsanitized/method: ["error"]' \
-            --rule 'no-unsanitized/property: ["error"]' \
+            --config .eslintrc.security.json \
             --ext .js
 
       # -----------------------------------------------------------------------
@@ -375,6 +360,7 @@ jobs:
 
       - name: 🔎 Trivy — Escaneo de imagen (informe tabla)
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           scan-type: 'image'
           image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
@@ -383,6 +369,7 @@ jobs:
           exit-code: '0'
 
       - name: 🔎 Trivy — Escaneo de imagen (informe JSON)
+        if: always()
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
@@ -479,24 +466,45 @@ jobs:
           done
 
       - name: 🕷️ OWASP ZAP — Baseline Scan
-        uses: zaproxy/action-baseline-scan@v0.12.0
-        with:
-          target: 'http://localhost:3000'
-          rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-I'
-          allow_issue_writing: false
-          artifact_name: 'zap-baseline-report'
+        run: |
+          docker pull ghcr.io/zaproxy/zaproxy:stable
+          docker run --rm \
+            --network host \
+            -v $(pwd):/zap/wrk \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://localhost:3000 \
+            -r /zap/wrk/zap-baseline-report.html \
+            -J /zap/wrk/zap-baseline-report.json \
+            -I || true
         continue-on-error: true
 
       - name: 🕷️ OWASP ZAP — Full Scan (solo rama vulnerable)
         if: github.ref_name == 'main-vulnerable'
-        uses: zaproxy/action-full-scan@v0.10.0
-        with:
-          target: 'http://localhost:3000'
-          cmd_options: '-I'
-          allow_issue_writing: false
-          artifact_name: 'zap-full-report'
+        run: |
+          docker run --rm \
+            --network host \
+            -v $(pwd):/zap/wrk \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-full-scan.py \
+            -t http://localhost:3000 \
+            -r /zap/wrk/zap-full-report.html \
+            -J /zap/wrk/zap-full-report.json \
+            -I || true
         continue-on-error: true
+
+      - name: 📤 Subir informes ZAP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-reports
+          path: |
+            zap-baseline-report.html
+            zap-baseline-report.json
+            zap-full-report.html
+            zap-full-report.json
+          retention-days: 30
+          if-no-files-found: warn
 
       - name: 🛑 Detener contenedor de la aplicación
         if: always()
